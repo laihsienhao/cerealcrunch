@@ -5,7 +5,10 @@ import pytest
 from PIL import Image
 
 from aigc_detect.transforms import (
+    _STACK_WEIGHTS,
     TRANSFORM_GRID,
+    _sample_num_transforms,
+    apply_random_robustness,
     center_crop,
     color_jitter,
     gaussian_blur,
@@ -89,3 +92,27 @@ def test_center_crop_removes_border_content(sample_image):
     ).resize((width, height), Image.BILINEAR)
 
     assert np.array_equal(np.asarray(result), np.asarray(reference))
+
+
+def test_stack_weights_sum_to_one():
+    assert sum(_STACK_WEIGHTS) == pytest.approx(1.0)
+
+
+def test_num_transforms_distribution_matches_weights():
+    rng = random.Random(0)
+    n_trials = 4000
+    counts = [0] * len(_STACK_WEIGHTS)
+    for _ in range(n_trials):
+        counts[_sample_num_transforms(rng)] += 1
+
+    for k, expected in enumerate(_STACK_WEIGHTS):
+        observed = counts[k] / n_trials
+        assert observed == pytest.approx(expected, abs=0.03)
+
+
+def test_apply_random_robustness_can_return_clean_image(sample_image):
+    for seed in range(200):
+        result = apply_random_robustness(sample_image, rng=random.Random(seed))
+        if np.array_equal(np.asarray(result), np.asarray(sample_image)):
+            return
+    pytest.fail("apply_random_robustness never returned a clean (untransformed) image in 200 seeds")

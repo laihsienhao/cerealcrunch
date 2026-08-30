@@ -103,22 +103,32 @@ TRANSFORM_FUNCTIONS: dict[str, Callable[..., Image.Image]] = {
 }
 
 
-def apply_random_robustness(
-    image: Image.Image, rng: random.Random | None = None, p: float = 0.5
-) -> Image.Image:
-    """Apply each PROBLEM.md transform independently with probability `p`.
+# P(exactly k of the 6 transforms are applied), k=0..6. Weighted toward 0-1
+# transforms to match how the robustness eval measures performance (clean vs.
+# ONE transform at a time), with 2+ stacked kept as a minority case for
+# realistic compound degradation (e.g. resize then re-compress).
+_STACK_WEIGHTS = [0.30, 0.40, 0.15, 0.08, 0.04, 0.02, 0.01]
+
+
+def _sample_num_transforms(rng: random.Random) -> int:
+    """Draw how many transforms to apply, per _STACK_WEIGHTS."""
+    return rng.choices(range(len(TRANSFORM_GRID) + 1), weights=_STACK_WEIGHTS, k=1)[0]
+
+
+def apply_random_robustness(image: Image.Image, rng: random.Random | None = None) -> Image.Image:
+    """Apply a random subset of PROBLEM.md transforms, sized per _STACK_WEIGHTS.
 
     Severity for each applied transform is drawn from its own value(s) in
     TRANSFORM_GRID, so training-time augmentation matches the exact
-    distribution the robustness eval will test against. Transforms can
-    stack (e.g. blur + jpeg both firing), mirroring realistic compound
-    degradation from re-encoding/resizing/filtering pipelines.
+    distribution the robustness eval will test against.
     """
     rng = rng or random.Random()
+    num_transforms = _sample_num_transforms(rng)
+    chosen_names = rng.sample(list(TRANSFORM_GRID), num_transforms)
+
     result = image
-    for name, params in TRANSFORM_GRID.items():
-        if rng.random() >= p:
-            continue
+    for name in chosen_names:
+        params = TRANSFORM_GRID[name]
         func = TRANSFORM_FUNCTIONS[name]
         if name == "jpeg_compression":
             result = func(result, quality=rng.choice(params["quality"]))
