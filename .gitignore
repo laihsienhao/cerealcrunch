@@ -7,3 +7,7 @@ __pycache__/
 # Datasets are large and rebuildable from data/README.md - never commit them.
 data/raw/*
 !data/raw/.gitkeep
+
+# Checkpoints are large binaries, rebuildable via scripts/train.py.
+models/checkpoints/*
+!models/checkpoints/.gitkeep
