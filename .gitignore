@@ -11,3 +11,7 @@ data/raw/*
 # Checkpoints are large binaries, rebuildable via scripts/train.py.
 models/checkpoints/*
 !models/checkpoints/.gitkeep
+
+# Eval outputs are regenerable via scripts/evaluate.py.
+outputs/eval/*
+!outputs/eval/.gitkeep
