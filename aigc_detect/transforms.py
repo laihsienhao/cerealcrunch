@@ -101,3 +101,42 @@ TRANSFORM_FUNCTIONS: dict[str, Callable[..., Image.Image]] = {
     "color_jitter": color_jitter,
     "center_crop": center_crop,
 }
+
+
+def apply_random_robustness(
+    image: Image.Image, rng: random.Random | None = None, p: float = 0.5
+) -> Image.Image:
+    """Apply each PROBLEM.md transform independently with probability `p`.
+
+    Severity for each applied transform is drawn from its own value(s) in
+    TRANSFORM_GRID, so training-time augmentation matches the exact
+    distribution the robustness eval will test against. Transforms can
+    stack (e.g. blur + jpeg both firing), mirroring realistic compound
+    degradation from re-encoding/resizing/filtering pipelines.
+    """
+    rng = rng or random.Random()
+    result = image
+    for name, params in TRANSFORM_GRID.items():
+        if rng.random() >= p:
+            continue
+        func = TRANSFORM_FUNCTIONS[name]
+        if name == "jpeg_compression":
+            result = func(result, quality=rng.choice(params["quality"]))
+        elif name == "gaussian_blur":
+            result = func(result, sigma=rng.choice(params["sigma"]))
+        elif name == "resize":
+            result = func(result, scale=rng.choice(params["scale"]))
+        elif name == "gaussian_noise":
+            noise_rng = np.random.default_rng(rng.randrange(2**32))
+            result = func(result, sigma=rng.choice(params["sigma"]), rng=noise_rng)
+        elif name == "color_jitter":
+            result = func(
+                result,
+                brightness=params["brightness"],
+                contrast=params["contrast"],
+                saturation=params["saturation"],
+                rng=rng,
+            )
+        elif name == "center_crop":
+            result = func(result, fraction=params["fraction"])
+    return result
