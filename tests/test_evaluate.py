@@ -7,7 +7,12 @@ from PIL import Image
 from torch import nn
 
 from aigc_detect.data import list_samples
-from aigc_detect.evaluate import EVAL_CONDITIONS, evaluate_condition, run_robustness_eval
+from aigc_detect.evaluate import (
+    EVAL_CONDITIONS,
+    compute_final_score,
+    evaluate_condition,
+    run_robustness_eval,
+)
 from aigc_detect.model import AIGCClassifier
 from aigc_detect.transforms import TRANSFORM_GRID
 
@@ -65,6 +70,22 @@ def test_evaluate_condition_metrics_on_synthetic_data(tmp_path):
     assert result["recall"] == pytest.approx(1.0)
     assert result["f1"] == pytest.approx(2 * 0.5 * 1.0 / (0.5 + 1.0))
     assert 0.0 <= result["roc_auc"] <= 1.0
+
+
+def test_compute_final_score_averages_correctly():
+    results = [{"transform": "clean", "roc_auc": 0.9}]
+    results += [{"transform": name, "roc_auc": auc} for name, auc in zip(
+        ["jpeg_compression"] * 4 + ["gaussian_blur"] * 3 + ["resize"] * 2
+        + ["gaussian_noise"] * 3 + ["color_jitter", "center_crop"],
+        [0.8, 0.7, 0.6, 0.5, 0.8, 0.7, 0.6, 0.8, 0.7, 0.5, 0.6, 0.5, 0.6, 0.7],
+    )]
+
+    score = compute_final_score(results)
+
+    assert score["auc_clean"] == pytest.approx(0.9)
+    robust_values = [r["roc_auc"] for r in results if r["transform"] != "clean"]
+    assert score["auc_robust"] == pytest.approx(sum(robust_values) / len(robust_values))
+    assert score["final_score"] == pytest.approx(0.5 * 0.9 + 0.5 * score["auc_robust"])
 
 
 @pytest.mark.skipif(

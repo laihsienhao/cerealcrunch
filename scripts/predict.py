@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import torch
 
+from aigc_detect.calibration import load_temperature
 from aigc_detect.model import AIGCClassifier
 from aigc_detect.predict import predict_directory, save_predictions_json
 
@@ -44,10 +45,13 @@ def main() -> None:
     model = AIGCClassifier().to(device)
     model.load_state_dict(torch.load(args.checkpoint_path, map_location=device))
 
-    results = predict_directory(model, args.input_dir, device, batch_size=args.batch_size)
+    temperature = load_temperature(args.checkpoint_path)
+    results = predict_directory(
+        model, args.input_dir, device, batch_size=args.batch_size, temperature=temperature
+    )
     save_predictions_json(results, args.output_json)
 
-    print(f"Wrote {len(results)} predictions to {args.output_json}")
+    print(f"Wrote {len(results)} predictions to {args.output_json} (temperature={temperature:.4f})")
 
 
 if __name__ == "__main__":

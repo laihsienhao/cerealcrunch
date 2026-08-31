@@ -30,7 +30,11 @@ def list_images(input_dir: Path) -> list[Path]:
 
 
 def predict_directory(
-    model: torch.nn.Module, input_dir: Path, device: torch.device, batch_size: int = 32
+    model: torch.nn.Module,
+    input_dir: Path,
+    device: torch.device,
+    batch_size: int = 32,
+    temperature: float = 1.0,
 ) -> list[dict]:
     """Run predictions over every image in input_dir, skipping unreadable files."""
     paths = list_images(input_dir)
@@ -47,7 +51,7 @@ def predict_directory(
     if not images:
         return []
 
-    probs = predict_probs(model, images, device, batch_size)
+    probs = predict_probs(model, images, device, batch_size, temperature=temperature)
     return [
         {"image_path": path.as_posix(), "pred": float(prob)}
         for path, prob in zip(valid_paths, probs)

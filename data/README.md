@@ -124,6 +124,8 @@ signal used throughout the AIGC-detection literature, and a risk of being a
 narrow single-source fingerprint that won't generalize to unseen generators
 - fully resolving it needs multi-source training data, out of scope here.
 
+**Why this matters beyond just fixing a bug:** an official organizer webinar (see `PROBLEM.md`'s "Webinar Information" section) explicitly frames this exact failure mode as the key thing to guard against - "do not just fine-tune a classifier; think about what your model is actually learning - is it a real artifact, or a dataset shortcut?" - and a cited NeurIPS 2025 finding (DDA) warns almost verbatim that "JPEG in your real images can become a spurious signal." This confound was found and fixed through that same discipline, not in response to the webinar - but it's a direct, concrete demonstration of exactly the risk the organizers flagged. Relatedly, the webinar specifies the scoring formula `0.50 x AUC_clean + 0.50 x AUC_robust` (ROC AUC, not accuracy, as the primary metric) - `aigc_detect.evaluate.compute_final_score` implements this directly, rather than us picking accuracy as a headline number arbitrarily.
+
 ## Not yet added
 
 - WildFake (ModelScope, needs the site's translation step before use): https://modelscope.cn/datasets/hy2628982280/WildFake/summary

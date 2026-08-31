@@ -109,19 +109,35 @@ def apply_condition(image: Image.Image, condition: dict, rng: random.Random) -> 
     raise ValueError(f"Unknown transform: {name}")
 
 
-def predict_probs(
+def predict_logits(
     model: torch.nn.Module, images: list[Image.Image], device: torch.device, batch_size: int = 32
 ) -> np.ndarray:
-    """Batched inference: PIL images -> P(image is AI-generated) per image."""
+    """Batched inference: PIL images -> raw (pre-sigmoid) logits per image."""
     model.eval()
-    probs = []
+    logits_list = []
     with torch.no_grad():
         for start in range(0, len(images), batch_size):
             batch = images[start : start + batch_size]
             pixel_values = torch.stack([preprocess(image) for image in batch]).to(device)
-            logits = model(pixel_values)
-            probs.append(torch.sigmoid(logits).cpu().numpy())
-    return np.concatenate(probs)
+            logits_list.append(model(pixel_values).cpu().numpy())
+    return np.concatenate(logits_list)
+
+
+def predict_probs(
+    model: torch.nn.Module,
+    images: list[Image.Image],
+    device: torch.device,
+    batch_size: int = 32,
+    temperature: float = 1.0,
+) -> np.ndarray:
+    """Batched inference: PIL images -> P(image is AI-generated) per image.
+
+    `temperature` rescales logits before the sigmoid (temperature scaling,
+    Guo et al. 2017) - see aigc_detect.calibration. Default 1.0 is a no-op,
+    identical to the uncalibrated behavior this function always had.
+    """
+    logits = predict_logits(model, images, device, batch_size)
+    return 1.0 / (1.0 + np.exp(-logits / temperature))
 
 
 def evaluate_condition(
@@ -131,6 +147,7 @@ def evaluate_condition(
     device: torch.device,
     batch_size: int = 32,
     seed: int = 0,
+    temperature: float = 1.0,
 ) -> dict:
     """Apply one condition to every sample, predict, and score against true labels."""
     rng = random.Random(seed)
@@ -142,7 +159,7 @@ def evaluate_condition(
         labels.append(label)
 
     labels_array = np.array(labels)
-    probs = predict_probs(model, images, device, batch_size)
+    probs = predict_probs(model, images, device, batch_size, temperature=temperature)
     preds = (probs > 0.5).astype(int)
     has_both_classes = len(set(labels)) > 1
 
@@ -159,17 +176,63 @@ def evaluate_condition(
     }
 
 
+def evaluate_by_fake_source(
+    model: torch.nn.Module,
+    real_samples: list[tuple[Path, int]],
+    fake_samples_by_source: dict[str, list[tuple[Path, int]]],
+    device: torch.device,
+    batch_size: int = 32,
+    temperature: float = 1.0,
+) -> list[dict]:
+    """Per-fake-source breakdown (e.g. ArtiFact's 25 generators): each
+    source's fake images combined with the *same shared* real pool.
+
+    AUC needs both classes present, and a single source's images alone are
+    all-fake - so this pairs each source against the same real images
+    rather than evaluating any source in isolation, matching the standard
+    cross-generator-generalization methodology (e.g. Ojha et al.).
+    """
+    results = []
+    for source, fake_samples in sorted(fake_samples_by_source.items()):
+        combined = real_samples + fake_samples
+        row = evaluate_condition(
+            model, combined, EVAL_CONDITIONS[0], device, batch_size, temperature=temperature
+        )
+        row["source"] = source
+        row["n_fake"] = len(fake_samples)
+        row["n_real"] = len(real_samples)
+        results.append(row)
+    return results
+
+
 def run_robustness_eval(
     model: torch.nn.Module,
     samples: list[tuple[Path, int]],
     device: torch.device,
     batch_size: int = 32,
+    temperature: float = 1.0,
 ) -> list[dict]:
     """Evaluate the model across all 15 conditions (1 clean + 14 transformed)."""
     return [
-        evaluate_condition(model, samples, condition, device, batch_size)
+        evaluate_condition(model, samples, condition, device, batch_size, temperature=temperature)
         for condition in EVAL_CONDITIONS
     ]
+
+
+def compute_final_score(results: list[dict]) -> dict:
+    """Blended score matching the organizers' stated formula:
+    Final score = 0.50 x AUC_clean + 0.50 x AUC_robust (webinar, PROBLEM.md).
+
+    AUC_robust is the mean ROC AUC across the 14 non-clean conditions.
+    """
+    auc_clean = next(r["roc_auc"] for r in results if r["transform"] == "clean")
+    robust_aucs = [r["roc_auc"] for r in results if r["transform"] != "clean"]
+    auc_robust = sum(robust_aucs) / len(robust_aucs)
+    return {
+        "auc_clean": auc_clean,
+        "auc_robust": auc_robust,
+        "final_score": 0.5 * auc_clean + 0.5 * auc_robust,
+    }
 
 
 def save_results_csv(results: list[dict], path: Path) -> None:

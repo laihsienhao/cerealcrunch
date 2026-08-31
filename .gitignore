@@ -16,6 +16,7 @@ models/checkpoints/*
 outputs/eval/*
 !outputs/eval/.gitkeep
 outputs/eval_sid*/
+outputs/eval_artifact*/
 
 # Error-analysis outputs are regenerable via scripts/error_analysis.py.
 outputs/error_analysis/*
