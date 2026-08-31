@@ -109,3 +109,28 @@ Presentation & Communication
 The team communicates their work with clarity. 
 [Final Event Only]: The pitch tells a coherent story; from problem to solution to potential, and the team is able to respond to questions with depth, demonstrating genuine understanding of their own project.
 10%
+
+## Webinar Information
+1. What makes an AI image detectable?
+  - Frequency artifacts: GAN/diffusion up-sampling leaves periodic patterns in the Fourier spectrum that cameras do not produce
+  - Noise and sensor fingerprints: real photos carry sensor noise (PRNU); synthetic images lack it or fake it imperfectly
+  - Texture and fine detail: skin, hair, foliage, text and reflections are where models still slip
+  - Semantic and physics tells: impossible lighting, warped hands, garbled text, inconsistent shadows etc.
+2. Key Insight: Go Hybrid
+  - Best detectors combine high-level CLIP semantics + low-level frequency patches - each catches what the other misses, and both survive different transforms
+  - Many signals live in high-frequency detail - exactly what compression and blur destroy, which is why robustness is hard
+  - Do not just fine-tune a classifier. Think about what your model is actually learning; is it a real artifact, or a dataset shortcut?
+3. Baseline Detection Pipeline
+  - Fine-tune a pretrained backbone (ResNet / EfficientNet / ViT) as a binary classifier
+  - Optional upgrade: add a frequency branch (FFT / DCT features) and fuse it with the spatial branch
+  - Output a calibrated probability, not just a label - you will need it for thresholding and error analysis
+4. Train for the Real World
+  - Augmentation = simulate redistribution during training: JPEG-compress, blur, resize, crop, colour-jitter, add noise, re-screenshot
+  - SAFE insight (KDD 2025): crop instead of down-sample to preserve high-frequency artifacts; ColorJitter + RandomRotation kill colour and semantic shortcuts
+  - DDA insight (NeurIPS 2025): watch out for frequency bias - JPEG in your real images can become a spurious signal. Align pixel + frequency.
+  - Augmentation + data alignment > architecture tricks. Training-pipeline improvements beat fancier backbones.
+5. Evaluate like it is the Real World
+  - Build a transformed test set
+  - Primary metric: ROC AUC (threshold-free, robust to imbalance)
+  - Final score: 0.50 x AUC_clean + 0.50 x AUC_robust
+  - Cross-generator: test on generators not in training, the real generalisation test
