@@ -15,7 +15,11 @@ models/checkpoints/*
 # Eval outputs are regenerable via scripts/evaluate.py.
 outputs/eval/*
 !outputs/eval/.gitkeep
+outputs/eval_sid*/
 
 # Error-analysis outputs are regenerable via scripts/error_analysis.py.
 outputs/error_analysis/*
 !outputs/error_analysis/.gitkeep
+
+# Run logs are regenerable, not source.
+logs/

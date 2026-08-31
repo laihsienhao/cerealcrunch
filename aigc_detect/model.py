@@ -27,9 +27,27 @@ CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 
 
 def preprocess(image: Image.Image) -> torch.Tensor:
-    """Resize a PIL image to the model's input size, as a [0, 1] float tensor (3, H, W)."""
-    resized = image.convert("RGB").resize((IMAGE_SIZE, IMAGE_SIZE), Image.BILINEAR)
-    array = np.asarray(resized, dtype=np.float32) / 255.0
+    """Resize (aspect-ratio-preserving) + center-crop to the model's input
+    size, as a [0, 1] float tensor (3, H, W).
+
+    This matches CLIP's own standard preprocessing (resize the shorter side,
+    then center-crop) rather than squashing the whole image to a square,
+    which would distort its aspect ratio - not something the frozen CLIP
+    branch ever saw during its own pretraining. For already-square images
+    (e.g. CIFAKE's 32x32) this is equivalent to a direct resize.
+    """
+    image = image.convert("RGB")
+    width, height = image.size
+    scale = IMAGE_SIZE / min(width, height)
+    new_width, new_height = max(IMAGE_SIZE, round(width * scale)), max(
+        IMAGE_SIZE, round(height * scale)
+    )
+    resized = image.resize((new_width, new_height), Image.BILINEAR)
+
+    left, top = (new_width - IMAGE_SIZE) // 2, (new_height - IMAGE_SIZE) // 2
+    cropped = resized.crop((left, top, left + IMAGE_SIZE, top + IMAGE_SIZE))
+
+    array = np.asarray(cropped, dtype=np.float32) / 255.0
     return torch.from_numpy(array).permute(2, 0, 1).contiguous()
 
 
@@ -111,14 +129,30 @@ class ClipRgbBranch(nn.Module):
 
 
 class AIGCClassifier(nn.Module):
-    """Frozen CLIP branch + trainable noise-residual branch, fused into one fake/real logit."""
+    """Frozen CLIP branch + optional trainable noise-residual branch, fused into one fake/real logit.
 
-    def __init__(self, clip_branch: ClipRgbBranch | None = None, residual_dim: int = 64):
+    use_noise_branch=False drops the noise branch entirely (CLIP features
+    only) - an ablation switch to check whether the branch is actually
+    contributing before committing the full architecture to an expensive
+    training run.
+    """
+
+    def __init__(
+        self,
+        clip_branch: ClipRgbBranch | None = None,
+        residual_dim: int = 64,
+        use_noise_branch: bool = True,
+    ):
         super().__init__()
         self.rgb_branch = clip_branch or ClipRgbBranch()
-        self.noise_branch = NoiseResidualBranch(out_dim=residual_dim)
+        self.use_noise_branch = use_noise_branch
 
-        fused_dim = self.rgb_branch.out_dim + residual_dim
+        fused_dim = self.rgb_branch.out_dim
+        self.noise_branch = None
+        if use_noise_branch:
+            self.noise_branch = NoiseResidualBranch(out_dim=residual_dim)
+            fused_dim += residual_dim
+
         self.head = nn.Sequential(
             nn.Linear(fused_dim, 128),
             nn.ReLU(inplace=True),
@@ -129,8 +163,11 @@ class AIGCClassifier(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (batch, 3, H, W) float tensor in [0, 1]. Returns (batch,) logits."""
         rgb_features = self.rgb_branch(x)
-        noise_features = self.noise_branch(x)
-        fused = torch.cat([rgb_features, noise_features], dim=1)
+        if self.use_noise_branch:
+            noise_features = self.noise_branch(x)
+            fused = torch.cat([rgb_features, noise_features], dim=1)
+        else:
+            fused = rgb_features
         return self.head(fused).squeeze(1)
 
     def num_parameters(self) -> int:
