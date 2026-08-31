@@ -50,11 +50,13 @@ def test_split_train_val_is_stratified():
 
 def test_dataset_returns_image_and_label():
     samples = list_samples(DATA_ROOT, "test")[:4]
-    dataset = CIFAKEDataset(samples, augment=False)
+    dataset = CIFAKEDataset(samples, augment=False, seed=0)
 
     assert len(dataset) == 4
     image, label = dataset[0]
-    assert image.size == (32, 32)
+    # strip_source_artifacts always resizes to its randomized shorter-side
+    # range, regardless of augment - so this is no longer CIFAKE's native 32x32.
+    assert min(image.size) >= 256
     assert image.mode == "RGB"
     assert label == samples[0][1]
     assert label in (0, 1)
@@ -65,6 +67,17 @@ def test_dataset_augmented_sample_is_valid_image():
     dataset = CIFAKEDataset(samples, augment=True, seed=0)
 
     image, label = dataset[0]
-    assert image.size == (32, 32)
+    assert min(image.size) >= 1
     assert image.mode == "RGB"
     assert label == samples[0][1]
+
+
+def test_dataset_applies_source_normalization_even_without_augment():
+    samples = list_samples(DATA_ROOT, "test")[:1]
+    dataset = CIFAKEDataset(samples, augment=False, seed=0)
+
+    image, _ = dataset[0]
+    # CIFAKE's native size is 32x32 - strip_source_artifacts must have run
+    # even with augment=False, since the confound it guards against is
+    # present in validation/test data too, not just augmented training data.
+    assert image.size != (32, 32)

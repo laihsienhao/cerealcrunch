@@ -25,7 +25,7 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 
 from aigc_detect.data import list_samples
 from aigc_detect.model import preprocess
-from aigc_detect.transforms import TRANSFORM_FUNCTIONS, TRANSFORM_GRID
+from aigc_detect.transforms import TRANSFORM_FUNCTIONS, TRANSFORM_GRID, strip_source_artifacts
 
 
 def _build_eval_conditions() -> list[dict]:
@@ -71,7 +71,16 @@ def sample_test_subset(
 
 
 def apply_condition(image: Image.Image, condition: dict, rng: random.Random) -> Image.Image:
-    """Apply a single eval condition (or pass through unchanged for "clean")."""
+    """Apply a single eval condition (or pass through unchanged for "clean").
+
+    Every condition - including "clean" - first goes through
+    strip_source_artifacts, since the model is now trained expecting that
+    normalization on every input; "clean" here means "the model's true
+    baseline input", not "the untouched original file". See data/README.md
+    for the dataset-level resolution/compression confound this guards
+    against.
+    """
+    image = strip_source_artifacts(image, rng)
     name = condition["transform"]
     if name is None:
         return image

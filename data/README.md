@@ -25,6 +25,11 @@ severity and results here shouldn't be treated as representative. A
 higher-resolution dataset (SID_Set) is planned before drawing real
 conclusions.
 
+Since `CIFAKEDataset` (shared by both datasets) now always applies
+`strip_source_artifacts` (see below), CIFAKE images get upsized to a
+randomized 256-800px range before training/eval too - any CIFAKE numbers
+from before that fix landed aren't directly comparable to later runs.
+
 ## SID_Set (higher resolution, for real numbers)
 
 Source: https://huggingface.co/datasets/saberzl/SID_Set (also documented in the
@@ -56,6 +61,11 @@ split out of CIFAKE's `train` folder.
         validation/
             REAL/
             FAKE/
+        test/
+            REAL/
+            FAKE/
+
+(`test/` is our own held-out set, carved from `train` - see above.)
 
 This matches CIFAKE's `REAL`/`FAKE` folder convention exactly, so
 `aigc_detect.data.list_samples`/`CIFAKEDataset`/`split_train_val` load it
@@ -78,6 +88,41 @@ extraction run is a real time investment (tens of minutes, depending on how
 much is already local vs. needs streaming), not a quick pipeline check.
 `tests/test_sid_data.py` only exercises this logic against small synthetic
 fixtures, not the real dataset, so the test suite stays fast and offline.
+
+## Known dataset confound: resolution/aspect-ratio/compression shortcut
+
+Direct inspection (sampling 1000+ images per class per split) found that
+every FAKE image in SID_Set is **exactly 1024x1024** and shares **one single,
+identical JPEG quantization-table signature**, while REAL images have
+diverse native resolutions (267-1024px), diverse aspect ratios, and a
+genuinely mixed set of quantization signatures - identically across train,
+validation, and test. This traces back to the source dataset: FAKE images
+were very likely stored as lossless PNGs at a fixed diffusion-model-typical
+1024x1024, while REAL images are natively JPEG from varied real-world
+sources at native resolutions. A model can trivially separate the two
+classes by native resolution/aspect-ratio/compression fingerprint alone,
+with zero regard for actual image content - and since JPEG quantization
+artifacts survive resizing, this shortcut also survives all 6 PROBLEM.md
+robustness transforms, producing misleadingly uniform "robust" numbers.
+
+**Fix:** `aigc_detect.transforms.strip_source_artifacts` runs on every image
+before anything else, unconditionally, both classes, every split (train,
+validation, test) and every robustness-eval condition including "clean" -
+it randomizes aspect ratio (via a random-aspect crop), resolution (via a
+resize to a randomized shorter-side length), and JPEG quality (via a
+re-encode), so none of the three can carry label information. See
+`CIFAKEDataset.__getitem__` (`aigc_detect/data.py`) and `apply_condition`
+(`aigc_detect/evaluate.py`) for where it's wired in.
+
+**Known, deliberately left unfixed:** direct inspection also found 130/300
+sampled REAL images carry an embedded ICC color profile vs. 0/300 FAKE, and
+3/300 REAL images are true grayscale vs. 0/300 FAKE. Neither is read as
+metadata by the model (only pixel arrays are ever fed in), but both likely
+mark genuine, systematic differences in real-camera vs. generator color/tone
+processing. This is double-edged: it's simultaneously a legitimate forensic
+signal used throughout the AIGC-detection literature, and a risk of being a
+narrow single-source fingerprint that won't generalize to unseen generators
+- fully resolving it needs multi-source training data, out of scope here.
 
 ## Not yet added
 

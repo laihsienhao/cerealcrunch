@@ -8,6 +8,7 @@ for the clean-vs-transformed robustness evaluation.
 from __future__ import annotations
 
 import io
+import math
 import random
 from typing import Callable
 
@@ -91,6 +92,61 @@ def center_crop(image: Image.Image, fraction: float = 0.8) -> Image.Image:
     left, top = (width - crop_width) // 2, (height - crop_height) // 2
     cropped = image.crop((left, top, left + crop_width, top + crop_height))
     return cropped.resize((width, height), Image.BILINEAR)
+
+
+# Range for strip_source_artifacts' random-aspect-ratio crop (width/height).
+_ASPECT_RATIO_RANGE = (0.75, 1.33)
+# Range for its random-resolution resize (shorter side, in px).
+_RESOLUTION_RANGE = (256, 800)
+# Range for its random-quality JPEG re-encode.
+_QUALITY_RANGE = (40, 95)
+
+
+def _random_aspect_crop(image: Image.Image, rng: random.Random) -> Image.Image:
+    """Crop the largest possible region at a randomly drawn aspect ratio."""
+    width, height = image.size
+    log_low, log_high = math.log(_ASPECT_RATIO_RANGE[0]), math.log(_ASPECT_RATIO_RANGE[1])
+    target_ratio = math.exp(rng.uniform(log_low, log_high))  # width / height
+
+    if target_ratio > width / height:
+        crop_width, crop_height = width, round(width / target_ratio)
+    else:
+        crop_width, crop_height = round(height * target_ratio), height
+    crop_width = max(1, min(crop_width, width))
+    crop_height = max(1, min(crop_height, height))
+
+    left = rng.randint(0, width - crop_width)
+    top = rng.randint(0, height - crop_height)
+    return image.crop((left, top, left + crop_width, top + crop_height))
+
+
+def _random_resolution_resize(image: Image.Image, rng: random.Random) -> Image.Image:
+    """Resize (aspect-preserving) so the shorter side equals a randomly drawn length."""
+    width, height = image.size
+    target_short = rng.randint(*_RESOLUTION_RANGE)
+    scale = target_short / min(width, height)
+    new_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    return image.resize(new_size, Image.BILINEAR)
+
+
+def strip_source_artifacts(image: Image.Image, rng: random.Random | None = None) -> Image.Image:
+    """Randomize aspect ratio, resolution, and JPEG quality.
+
+    Removes any dataset-level shortcut tied to a class's native framing or
+    compression history (e.g. one class always being exactly square at a
+    fixed resolution with one fixed encoder signature) rather than genuine
+    content. Applied unconditionally to every image, both classes, so
+    neither retains a distinguishing source fingerprint. Distinct from
+    apply_random_robustness, which simulates post-hoc real-world
+    degradation for robustness training/eval rather than equalizing
+    source-level distributions.
+    """
+    rng = rng or random.Random()
+    result = image.convert("RGB")
+    result = _random_aspect_crop(result, rng)
+    result = _random_resolution_resize(result, rng)
+    quality = rng.randint(*_QUALITY_RANGE)
+    return jpeg_compression(result, quality=quality)
 
 
 TRANSFORM_FUNCTIONS: dict[str, Callable[..., Image.Image]] = {

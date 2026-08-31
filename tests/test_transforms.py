@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from aigc_detect.transforms import (
+    _RESOLUTION_RANGE,
     _STACK_WEIGHTS,
     TRANSFORM_GRID,
     _sample_num_transforms,
@@ -15,6 +16,7 @@ from aigc_detect.transforms import (
     gaussian_noise,
     jpeg_compression,
     resize_degrade,
+    strip_source_artifacts,
 )
 
 # Transcribed independently from PROBLEM.md so a future edit to TRANSFORM_GRID
@@ -116,3 +118,38 @@ def test_apply_random_robustness_can_return_clean_image(sample_image):
         if np.array_equal(np.asarray(result), np.asarray(sample_image)):
             return
     pytest.fail("apply_random_robustness never returned a clean (untransformed) image in 200 seeds")
+
+
+@pytest.fixture
+def square_image() -> Image.Image:
+    """A larger, exactly-square source image - mirrors SID_Set's FAKE images
+    (always 1024x1024), the specific shape strip_source_artifacts must not
+    leave distinguishably square."""
+    rng = np.random.default_rng(1)
+    array = rng.integers(0, 256, size=(512, 512, 3), dtype=np.uint8)
+    return Image.fromarray(array, mode="RGB")
+
+
+def test_strip_source_artifacts_output_in_expected_ranges(square_image):
+    result = strip_source_artifacts(square_image, rng=random.Random(0))
+    assert result.mode == "RGB"
+    assert _RESOLUTION_RANGE[0] <= min(result.size) <= _RESOLUTION_RANGE[1] + 1
+
+
+def test_strip_source_artifacts_randomizes_aspect_ratio_of_square_input(square_image):
+    """A native 1:1 image must not stay 1:1 forever - that's exactly the
+    residual shortcut this function exists to remove."""
+    saw_non_square = False
+    for seed in range(20):
+        result = strip_source_artifacts(square_image, rng=random.Random(seed))
+        if result.size[0] != result.size[1]:
+            saw_non_square = True
+            break
+    assert saw_non_square
+
+
+def test_strip_source_artifacts_different_seeds_give_different_sizes(square_image):
+    """Guards against accidentally hardcoding a fixed resolution/quality,
+    which would just replace one fixed source fingerprint with another."""
+    sizes = {strip_source_artifacts(square_image, rng=random.Random(seed)).size for seed in range(15)}
+    assert len(sizes) > 1

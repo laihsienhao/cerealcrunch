@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 
-from aigc_detect.transforms import apply_random_robustness
+from aigc_detect.transforms import apply_random_robustness, strip_source_artifacts
 
 CLASS_TO_LABEL = {"REAL": 0, "FAKE": 1}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -69,6 +69,11 @@ class CIFAKEDataset(Dataset):
     def __getitem__(self, index: int) -> tuple[Image.Image, int]:
         path, label = self.samples[index]
         image = Image.open(path).convert("RGB")
+        # Applied unconditionally (train and val/test alike) - source images
+        # differ systematically in native resolution/aspect ratio/compression
+        # history in a way that's correlated with label but not with actual
+        # content; see data/README.md for the confound this guards against.
+        image = strip_source_artifacts(image, rng=self._rng)
         if self.augment:
             image = apply_random_robustness(image, rng=self._rng)
         return image, label
