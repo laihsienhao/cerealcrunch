@@ -1,6 +1,6 @@
 # Robust Detection of AI-Generated Images Under Real-World Transformations
 
-TikTok TechJam 2026 submission — Problem Statement 5
+TikTok TechJam 2026 - Problem Statement 5
 
 Cereal Crunch is a binary AI-generated-image classifier (<2B params) that detects synthetic images on both clean images as well as images under 6 real-world post-processing transforms (JPEG compression, Gaussian blur, resize, Gaussian noise, color jitter, center crop).
 
@@ -25,6 +25,19 @@ skip slow network metadata checks on subsequent runs. Developed and
 trained locally on Apple Silicon (M4) - `torch` will use the MPS backend
 automatically when available, falling back to CPU otherwise.
 
+## Quick Start (Pre-trained Model)
+
+To run the required prediction CLI without retraining from scratch, download the
+primary submitted checkpoint from [the GitHub Release](https://github.com/laihsienhao/cerealcrunch/releases/download/TikTok_TechJam/cereal_crunch.pt) and place it at
+`models/checkpoints/cereal_crunch.pt`, then:
+
+```
+python scripts/predict.py --input_dir path/to/images --output_json outputs/predictions.json
+```
+
+The sections below cover reproducing the full pipeline (data acquisition, training,
+evaluation) from scratch instead.
+
 ## Reproducing Results
 
 Datasets are gitignored (large, rebuildable) - see `data/README.md` for full details on all three datasets. A summary is given as follows:
@@ -46,7 +59,7 @@ Train the primary model from scratch (one epoch at a time; results were reviewed
 ```
 python scripts/train.py --data_root data/raw/artifact_full --val_split validation \
   --epochs 1 --batch_size 32 --num_workers 4 \
-  --checkpoint_path models/checkpoints/aigc_classifier_artifact.pt \
+  --checkpoint_path models/checkpoints/cereal_crunch.pt \
   --latest_checkpoint_path models/checkpoints/latest_artifact.pt
 
 # subsequent epochs: add --epochs N --resume_from models/checkpoints/latest_artifact.pt
@@ -56,10 +69,10 @@ Run the robustness evaluation (clean + all 14 image transforms), the per-generat
 cross-generator breakdown, and the required prediction CLI:
 
 ```
-python scripts/evaluate.py --checkpoint_path models/checkpoints/aigc_classifier_artifact.pt \
+python scripts/evaluate.py --checkpoint_path models/checkpoints/cereal_crunch.pt \
   --data_root data/raw/artifact_full --n_per_class 1000 --output_dir outputs/eval_final
 
-python scripts/evaluate_crossgen_by_source.py --checkpoint_path models/checkpoints/aigc_classifier_artifact.pt \
+python scripts/evaluate_crossgen_by_source.py --checkpoint_path models/checkpoints/cereal_crunch.pt \
   --data_root data/raw/artifact_full --split test --output_dir outputs/eval_final
 
 python scripts/predict.py --input_dir path/to/images --output_json outputs/predictions.json
@@ -70,7 +83,7 @@ python scripts/predict.py --input_dir path/to/images --output_json outputs/predi
 Calibration (temperature scaling applied by `predict.py`/`evaluate.py`):
 
 ```
-python scripts/calibrate.py --checkpoint_path models/checkpoints/aigc_classifier_artifact.pt \
+python scripts/calibrate.py --checkpoint_path models/checkpoints/cereal_crunch.pt \
   --data_root data/raw/artifact_full --val_split validation
 ```
 
@@ -131,19 +144,19 @@ The model was also evaluated for each individual generator by pairing each of Ar
 | stylegan3 | 1.000 | 0.9998 |
 | afhq | 1.000 | 0.9999 |
 
-All 25 generators scored above chance, with the weakest (`generative_inpainting`, an inpainting method rather than a full-image generator, which may be harder as it only modifies part of the image) still scoring well above 0.5 AUC.
+All 25 generators scored above chance, with the weakest (`generative_inpainting`, an inpainting method which only modifies part of the image) still scoring well above 0.5 AUC.
 
-However, re-testing the ArtiFact-trained model back against SID_Set's original FLUX-generated images gave an AUC of ~0.48 again. Training on ArtiFact's diversity resulted in improved generalisation within the ArtiFact dataset, but it failed to produce unconditional generalisation to a generator family (FLUX) outside of the training distribution, which is somewhat expected.
+However, testing the ArtiFact-trained model against SID_Set's FLUX-generated images gave an AUC of about 0.48. The diversity of ArtiFact's dataset resulted in improved generalisation within the ArtiFact dataset, but it failed to produce unconditional generalisation to a generator family (FLUX) outside of the training distribution.
 
 ## Error Analysis Note
 
-Evaluation on the held-out test split returned 15 false positives (FPR = 3.00%) and 156 false negatives (FNR = 31.20%). The model is considerably more likely to miss a fake than to falsely flag a real image, which makes sense given that fake images can come from many different generator families, while real images are, intrisically, real. 10 representative examples of both false positives and false negatives have been provided in `outputs/final/error_analysis_examples/`, with per-image predicted probabilities in `errors.csv` there. This asymmetry, combined with the per-generator table above, suggests the false negatives concentrate in exactly the weaker generators (inpainting/older-GAN outputs) rather than being spread evenly.
+Evaluation on the held-out test split returned 15 false positives (FPR = 3.00%) and 156 false negatives (FNR = 31.20%). The model is considerably more likely to miss a fake than to falsely flag a real image, which makes sense given that fake images can come from many different generator families and carry many different signatures. 10 representative examples of both false positives and false negatives have been provided in `outputs/final/error_analysis_examples/`, with per-image predicted probabilities in `errors.csv` there. This asymmetry, combined with the per-generator table above, suggests the false negatives concentrate in exactly the weaker generators (inpainting/older-GAN outputs) rather than being spread evenly.
 
 False negatives concentrate overwhelmingly in inpainting-based generators; `generative_inpainting` alone accounts for 6 of the 18 lowest-confidence false negatives (the model's single worst generator in the per-generator table above, at 0.7575 AUC); `lama` (another inpainting method) also appears. A visual inspection of the most confidently-wrong example (`generative_inpainting__img000025.jpg`, predicted 97.6% real) shows that it is an ordinary photo of cows at a feeding trough, with no visually obvious synthetic region. Since inpainting only regenerates a small masked region of an otherwise real photo, the large majority of the image's actual pixel content may well be real. As such, a whole-image classifier may have little reason to classify the overall image as fake when most of it has been unmodified. The remaining false negatives cluster in older-generation, full-image generators (`stylegan1`, `pro_gan`, `ddpm`) rather than the modern ones (`stylegan2/3`, `stable_diffusion`) that score near-perfectly. These examples may lack the obvious synthetic tells (warped backgrounds, asymmetric features) that made earlier-generation GAN output easy to spot by eye.
 
 False positives cluster disproportionately in real face photos; `celebahq`/`ffhq` account for roughly half of the 15, including the two most confident mistakes. A visual inspection of the top example (`celebahq__img000391.jpg`, predicted 81.6% fake) shows that it is a heavily-retouched, professionally-lit beauty photograph, with very smooth skin, soft studio lighting and symmetric framing. Its visual "closeness" to the characteristic polished and perfect aesthetic that face-generating models (`stylegan2/3`, `star_gan`, `face_synthetics` - all scoring 0.99+ AUC) produce may have interfered with the classifier's signals. The classifier has thus picked up on a visual similarity between heavily-processed real photography and generative smoothness, which may be a harder and more specific confusion than generic noise.
 
-## Limitations & What I'd Improve Given More Time
+## Limitations & Future Work
 
 - Generalization is bounded by training diversity. The ArtiFact-trained model fails to generalise to FLUX (SID_Set), a generator family outside its training distribution. More generator families in training could test this more rigorously and result in a more highly generalisable model.
 - While the current noise-residual branch uses local, spatial high-pass filters (Sobel/Laplacian), a global frequency-domain (FFT/DCT) branch could capture periodic upsampling artifacts that would be missed by current local filters.

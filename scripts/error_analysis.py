@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint_path",
         type=Path,
-        default=Path("models/checkpoints/aigc_classifier_artifact.pt"),
+        default=Path("models/checkpoints/cereal_crunch.pt"),
     )
     parser.add_argument("--data_root", type=Path, default=Path("data/raw/artifact_full"))
     parser.add_argument("--n_per_class", type=int, default=500)

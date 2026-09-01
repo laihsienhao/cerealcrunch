@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint_path",
         type=Path,
-        default=Path("models/checkpoints/aigc_classifier_artifact.pt"),
+        default=Path("models/checkpoints/cereal_crunch.pt"),
     )
     parser.add_argument("--batch_size", type=int, default=32)
     return parser.parse_args()
