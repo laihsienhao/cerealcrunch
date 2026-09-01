@@ -24,3 +24,7 @@ outputs/error_analysis/*
 
 # Run logs are regenerable, not source.
 logs/
+
+# Video-production material, not a project deliverable.
+demo_video_samples/
+outputs/demo_predictions.json
