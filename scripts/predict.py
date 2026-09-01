@@ -29,7 +29,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input_dir", type=Path, required=True)
     parser.add_argument("--output_json", type=Path, default=Path("outputs/predictions.json"))
     parser.add_argument(
-        "--checkpoint_path", type=Path, default=Path("models/checkpoints/aigc_classifier.pt")
+        "--checkpoint_path",
+        type=Path,
+        default=Path("models/checkpoints/aigc_classifier_artifact.pt"),
     )
     parser.add_argument("--batch_size", type=int, default=32)
     return parser.parse_args()

@@ -27,9 +27,11 @@ from aigc_detect.model import AIGCClassifier
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the robustness evaluation harness.")
     parser.add_argument(
-        "--checkpoint_path", type=Path, default=Path("models/checkpoints/aigc_classifier.pt")
+        "--checkpoint_path",
+        type=Path,
+        default=Path("models/checkpoints/aigc_classifier_artifact.pt"),
     )
-    parser.add_argument("--data_root", type=Path, default=Path("data/raw/cifake"))
+    parser.add_argument("--data_root", type=Path, default=Path("data/raw/artifact_full"))
     parser.add_argument("--n_per_class", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
