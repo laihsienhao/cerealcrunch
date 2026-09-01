@@ -126,6 +126,60 @@ narrow single-source fingerprint that won't generalize to unseen generators
 
 **Why this matters beyond just fixing a bug:** an official organizer webinar (see `PROBLEM.md`'s "Webinar Information" section) explicitly frames this exact failure mode as the key thing to guard against - "do not just fine-tune a classifier; think about what your model is actually learning - is it a real artifact, or a dataset shortcut?" - and a cited NeurIPS 2025 finding (DDA) warns almost verbatim that "JPEG in your real images can become a spurious signal." This confound was found and fixed through that same discipline, not in response to the webinar - but it's a direct, concrete demonstration of exactly the risk the organizers flagged. Relatedly, the webinar specifies the scoring formula `0.50 x AUC_clean + 0.50 x AUC_robust` (ROC AUC, not accuracy, as the primary metric) - `aigc_detect.evaluate.compute_final_score` implements this directly, rather than us picking accuracy as a headline number arbitrarily.
 
+## ArtiFact (cross-generator generalization check + primary training set)
+
+Source: https://huggingface.co/datasets/bitmind/ArtiFact (mirror of
+awsaf49/artifact-dataset, originally published ICIP 2023, arXiv:2302.11970).
+
+~2.5M images (965K real, 1.53M fake) uniformly resized to 200x200 across:
+
+- **8 real sources**: LSUN, COCO, ImageNet, FFHQ, CelebA-HQ, CycleGAN,
+  Landscape, MetFaces
+- **25 fake generators**: 13 GANs, 7 diffusion models, 5 miscellaneous
+  (inpainting/face-synthesis) methods
+
+Originally used to test whether the SID_Set-trained model generalizes to
+generators it's never seen (it didn't - see below), then used to train the
+**primary submitted model** from scratch once that gap was found.
+
+**Why not just load it normally:** it ships as a single ~31.7GB monolithic
+zip, unlike SID_Set's per-file Parquet shards - no per-generator split,
+so downloading it in full just to keep a small stratified sample isn't
+practical. `scripts/extract_artifact.py` (`aigc_detect/artifact_data.py`)
+uses `remotezip` (HTTP range requests) to list the archive's ~2.5M entries
+without downloading the 31.7GB payload, then selectively fetches only the
+files needed for a stratified sample (280/generator x 25, 875/source-worth
+x 8, evenly spread). Resumable - safe to re-run after an interruption
+(this really did happen twice in practice: once from a transient disk-full
+condition, once from a server-side 504 timeout), already-fetched files are
+skipped.
+
+`scripts/prepare_artifact_split.py` then splits that pool into a
+source-stratified train/validation/test (`aigc_detect/crossgen_data.py`'s
+`split_by_source_stratified`) - every one of the 25 generators and 8 real
+sources is represented in every split, not left to chance:
+
+    data/raw/artifact_full/
+        train/{REAL,FAKE}/       # 5000 each (200/generator, 625/source)
+        validation/{REAL,FAKE}/  # 1000 each (40/generator, 125/source)
+        test/{REAL,FAKE}/        # 1000 each (40/generator, 125/source)
+
+The raw stratified pool (`data/raw/artifact_crossgen/test/`, filenames
+prefixed `<source>__` so per-generator/per-source breakdowns stay possible)
+is kept separate from this derived split, so re-running the split script
+with different train/val/test targets doesn't require re-extracting.
+
+**Does it need the same deconfounding fix as SID_Set?** Its uniform 200x200
+resize already rules out the specific resolution-based shortcut found in
+SID_Set. Two other candidates were checked directly: whether `afhq`
+(animal faces, with no matching real-photo source in our 8) shows
+anomalously high accuracy versus the other 24 generators (it doesn't - it
+scored in the *lower* half, ruling out that specific content-domain
+shortcut); and whether the model is exploiting a residual double-JPEG-
+compression signature (not directly tested on ArtiFact itself, but the
+same test on SID_Set found no effect - see above). Not exhaustively ruled
+out, but no evidence found despite specifically looking.
+
 ## Not yet added
 
 - WildFake (ModelScope, needs the site's translation step before use): https://modelscope.cn/datasets/hy2628982280/WildFake/summary
